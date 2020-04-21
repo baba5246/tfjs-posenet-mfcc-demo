@@ -8,6 +8,7 @@ const MFCC_HISTORY_MAX_LENGTH = 20
 let curMFCC = null
 let curRMS = 0
 let mfccHistory = []
+let mfccFeatures = []
 
 // posenet settings
 const imageScaleFactor = 0.2
@@ -21,7 +22,7 @@ let curKeypoints = null
 let trainData = []
 const NUM_FRAMES = MFCC_HISTORY_MAX_LENGTH
 const INPUT_SHAPE = [NUM_FRAMES, NUM_MFCC_COEF, 1]
-let model = null;
+let model = null
 
 let audioStream = null
 let videoStream = null
@@ -67,7 +68,12 @@ function detectPoseInRealTime(video, net) {
     ctx.restore()
 
     poses.forEach(({score, keypoints}) => {
-      curKeypoints = keypoints.slice(0, 5).map(kp => [kp.position.x, kp.position.y])
+      curKeypoints = keypoints
+      .slice(0, 5)
+      .map(kp => [
+        kp.position.x / contentWidth,
+        kp.position.y / contentHeight
+      ])
       drawPoint(keypoints[0], ctx)
       drawPoint(keypoints[1], ctx)
       drawPoint(keypoints[2], ctx)
@@ -81,7 +87,7 @@ function detectPoseInRealTime(video, net) {
   poseDetectionFrame()
 }
 
-function drawPoint(kp, ctx, color='pink') {
+function drawPoint(kp, ctx, color = 'pink') {
   ctx.beginPath()
   ctx.arc(kp.position.x, kp.position.y, 3, 0, 2 * Math.PI)
   ctx.fillStyle = color
@@ -112,12 +118,16 @@ function saveAudioFeatures(features) {
   if (mfccHistory.length > MFCC_HISTORY_MAX_LENGTH) {
     mfccHistory.splice(0, 1)
   }
+  const mfccValues = mfccHistory.flat()
+  const mean = math.mean(mfccValues)
+  const std = math.std(mfccValues)
+  mfccFeatures = mfccHistory.map(mfcc => mfcc.map(v => (v - mean) / std))
 }
 
 recordBtn.onmousedown = () => {
   recordClearId = setInterval(() => {
     trainData.push({
-      mfcc: mfccHistory,
+      mfcc: mfccFeatures,
       kp: curKeypoints
     })
     console.log(trainData.length)
@@ -130,14 +140,23 @@ recordBtn.onmouseup = () => {
 
 trainBtn.onclick = async () => {
   model = tf.sequential()
-  model.add(tf.layers.conv2d({
-    filters: 8,
+  model.add(tf.layers.depthwiseConv2d({
+    depthMultiplier: 8,
     kernelSize: [3, 3],
+    activation: 'relu',
+    inputShape: INPUT_SHAPE
+  }))
+  model.add(tf.layers.maxPooling2d({poolSize: [2, 2], strides: [1, 1]}))
+  model.add(tf.layers.depthwiseConv2d({
+    depthMultiplier: 8,
+    kernelSize: [5, 5],
     activation: 'relu',
     inputShape: INPUT_SHAPE
   }))
   model.add(tf.layers.maxPooling2d({poolSize: [2, 2], strides: [2, 2]}))
   model.add(tf.layers.flatten())
+  model.add(tf.layers.dense({units: 32}))
+  model.add(tf.layers.dropout({rate: 0.50}))
   model.add(tf.layers.dense({units: 10}))
   const optimizer = tf.train.adam(0.01)
   model.compile({
@@ -152,20 +171,20 @@ trainBtn.onclick = async () => {
   const xs = tf.tensor(trainData.map(d => d.mfcc), xsShape)
 
   await model.fit(xs, ys, {
-   batchSize: 16,
-   epochs: 20,
-   callbacks: {
-     onEpochEnd: (epoch, logs) => {
-       console.log(`MSE: ${logs.mse.toFixed(4)} % Epoch: ${epoch + 1}`)
-     }
-   }
+    batchSize: 16,
+    epochs: 20,
+    callbacks: {
+      onEpochEnd: (epoch, logs) => {
+        console.log(`MSE: ${logs.mse.toFixed(4)} % Epoch: ${epoch + 1}`)
+      }
+    }
   })
   tf.dispose([xs, ys])
 }
 
 listenBtn.onclick = () => {
   setInterval(() => {
-    const xs = tf.tensor([mfccHistory], [1, ...INPUT_SHAPE])
+    const xs = tf.tensor([mfccFeatures], [1, ...INPUT_SHAPE])
     const results = model.predict(xs).dataSync()
     drawPredicted(results)
   }, 10)
@@ -179,11 +198,11 @@ function drawPredicted(points) {
   ctx.drawImage(video, 0, 0, contentWidth, contentHeight)
   ctx.restore()
   const keypoints = []
-  for (let i = 0; i < points.length; i+=2) {
+  for (let i = 0; i < points.length; i += 2) {
     keypoints.push({
       position: {
-        x: points[i],
-        y: points[i+1]
+        x: points[i] * contentWidth,
+        y: points[i + 1] * contentHeight
       }
     })
   }
