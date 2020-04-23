@@ -141,22 +141,23 @@ recordBtn.onmouseup = () => {
 trainBtn.onclick = async () => {
   model = tf.sequential()
   model.add(tf.layers.depthwiseConv2d({
-    depthMultiplier: 8,
-    kernelSize: [3, 3],
+    depthMultiplier: 20,
+    kernelSize: [10, 10],
     activation: 'relu',
     inputShape: INPUT_SHAPE
   }))
   model.add(tf.layers.maxPooling2d({poolSize: [2, 2], strides: [1, 1]}))
   model.add(tf.layers.depthwiseConv2d({
-    depthMultiplier: 8,
-    kernelSize: [5, 5],
+    depthMultiplier: 10,
+    kernelSize: [7, 7],
     activation: 'relu',
     inputShape: INPUT_SHAPE
   }))
-  model.add(tf.layers.maxPooling2d({poolSize: [2, 2], strides: [2, 2]}))
+  model.add(tf.layers.maxPooling2d({poolSize: [2, 2], strides: [1, 1]}))
   model.add(tf.layers.flatten())
+  model.add(tf.layers.dense({units: 512}))
+  model.add(tf.layers.dropout({rate: 0.30}))
   model.add(tf.layers.dense({units: 32}))
-  model.add(tf.layers.dropout({rate: 0.50}))
   model.add(tf.layers.dense({units: 10}))
   const optimizer = tf.train.adam(0.01)
   model.compile({
@@ -165,6 +166,8 @@ trainBtn.onclick = async () => {
     metrics: ['mse', 'mae', 'mape', 'cosine']
   })
   console.log(model.summary())
+
+  trainData = shuffle(trainData)
 
   const ys = tf.tensor(trainData.map(d => d.kp.flat()))
   const xsShape = [trainData.length, ...INPUT_SHAPE]
@@ -211,5 +214,11 @@ function drawPredicted(points) {
   })
 }
 
-
+const shuffle = (array) => {
+  for (let i = array.length - 1; i >= 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [array[i], array[j]] = [array[j], array[i]];
+  }
+  return array;
+}
 
